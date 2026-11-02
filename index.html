@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Map</title>
+<!-- Agent Map starter by Gary Stow (garystow.co.uk/agents/map/), MIT licence. Edit agents.json, not this file. -->
+<style>
+:root{--bg:#070a12;--panel:#111827;--fg:#f4f6fb;--muted:#c3cad6;--line:#2a3346;--bad:#ff3b47;--ok:#7fe0a0;
+--sans:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans)}
+body{padding:16px;font-size:18px;line-height:1.5}
+h1{font-size:1.7rem;margin:0 0 .4rem}
+.top{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;align-items:baseline;margin-bottom:.6rem}
+.status{font-weight:700;padding:.15rem .8rem;border-radius:999px;border:2px solid currentColor}
+.status.g{color:var(--ok)}.status.r{color:var(--bad)}
+.muted{color:var(--muted);font-size:1rem}
+.legend{display:flex;flex-wrap:wrap;gap:.5rem 1.2rem;margin:.4rem 0 .8rem;color:var(--muted);font-size:1rem}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:.4rem;vertical-align:-1px}
+.controls{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.8rem}
+.controls button{font:inherit;font-size:1rem;font-weight:600;padding:.45rem .9rem;border-radius:10px;border:2px solid #34405a;background:var(--panel);color:var(--fg);cursor:pointer}
+.controls button[aria-pressed="true"]{border-color:var(--fg)}
+button:focus-visible{outline:3px solid #9db8ff;outline-offset:2px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:1rem}
+.stage{position:relative;min-width:0;border:2px solid var(--line);border-radius:14px;overflow:hidden;background:radial-gradient(ellipse at center,#121a2e 0%,#070a12 70%)}
+canvas{display:block;width:100%;height:min(80vh,820px);touch-action:none;cursor:grab}
+.hint{position:absolute;left:12px;bottom:10px;color:var(--muted);font-size:.95rem;pointer-events:none}
+.panel{background:var(--panel);border:2px solid var(--line);border-radius:14px;padding:1rem;display:flex;flex-direction:column;gap:.7rem;max-height:min(80vh,820px);overflow:auto;min-width:0}
+.panel h2{font-size:1.4rem;margin:0}
+.panel p{margin:0}.sub{font-weight:700}
+.panel ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.35rem}
+.panel li button{all:unset;box-sizing:border-box;cursor:pointer;display:block;width:100%;padding:.4rem .7rem;border-radius:8px;border:2px solid var(--line)}
+.panel li button:hover{border-color:#9db8ff}
+.chip{display:inline-block;font-size:.85rem;font-weight:700;padding:.05rem .6rem;border-radius:999px;border:2px solid currentColor;margin:0 .35rem .3rem 0}
+.back{font:inherit;font-weight:700;padding:.45rem .9rem;border-radius:10px;border:2px solid #34405a;background:transparent;color:var(--fg);cursor:pointer}
+@media (max-width:900px){.layout{grid-template-columns:1fr}canvas{height:min(68vh,560px)}.panel{max-height:none}}
+</style>
+</head>
+<body>
+<div class="top"><h1 id="title">Agent Map</h1><span id="status" class="status"></span><span class="muted" id="checked"></span></div>
+<div class="legend" id="legend"></div>
+<div class="controls" role="group" aria-label="Show">
+  <button data-f="all" aria-pressed="true">Everything</button>
+  <button data-f="bad" aria-pressed="false">Only problems</button>
+  <button id="spin" aria-pressed="true">Auto-spin on</button>
+</div>
+<div class="layout">
+  <div class="stage"><canvas id="c" aria-label="A 3D sphere of every agent. Drag to turn, scroll or pinch to zoom, click a light for details. The same information is listed in the panel."></canvas><div class="hint">Drag to turn · scroll or pinch to zoom · click a light</div></div>
+  <aside class="panel" id="panel" aria-live="polite"></aside>
+</div>
+<script>
+(function(){
+const BAD='#ff3b47',CENTRE='#ffffff',TOPC='#9db8ff';
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SPIN=0.0009, FLOW_SECONDS=7;
+let N=[],E=[],byId={},TEAMS={},COL={};
+const cv=document.getElementById('c'),cx=cv.getContext('2d'),panel=document.getElementById('panel');
+let W=0,H=0;function size(){const d=Math.min(2,devicePixelRatio||1);W=cv.clientWidth;H=cv.clientHeight;cv.width=W*d;cv.height=H*d;cx.setTransform(d,0,0,d,0,0);}
+addEventListener('resize',size);size();
+let rx=-0.25,ry=0.6,zoom=1,spin=!reduce,filter='all',sel=null,hover=null,drag=false;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function load(d){
+  document.getElementById('title').textContent=d.title||'Agent Map';document.title=d.title||'Agent Map';
+  (d.teams||[]).forEach(t=>{TEAMS[t.id]=t.name;COL[t.id]=t.colour||'#ffc857';});
+  N=(d.agents||[]).map(a=>({...a,kind:'agent'}));
+  (d.centre||[]).forEach(c=>N.push({...c,team:c.top?'_top':'_centre',ok:c.ok!==false,kind:c.top?'top':'centre'}));
+  N.forEach(n=>byId[n.id]=n);
+  E=(d.handoffs||[]).filter(e=>byId[e.from]&&byId[e.to]);
+  N.forEach(n=>{n.alone=!E.some(e=>e.ok&&(e.from===n.id||e.to===n.id));n.bad=n.ok===false||n.alone;});
+  // place: each team gets its own slice of the sphere; "top" items near the top, "centre" items inside
+  const ids=Object.keys(TEAMS),G=Math.PI*(3-Math.sqrt(5)),span=360/Math.max(1,ids.length);
+  ids.forEach((tid,ti)=>{const L=N.filter(n=>n.team===tid);const l0=-180+ti*span+8,l1=l0+span-16;
+    L.forEach((n,i)=>{const f=(i+0.5)/L.length;const y=0.82-1.64*f;const r=Math.sqrt(1-y*y);
+      const lon=(l0+((i*G*180/Math.PI*0.62)%(l1-l0)+(l1-l0))%(l1-l0))*Math.PI/180;n.p=[r*Math.sin(lon),y,r*Math.cos(lon)];});});
+  N.filter(n=>n.kind==='top').forEach((n,i,a)=>{const lon=(i-(a.length-1)/2)*0.5;n.p=[0.3*Math.sin(lon),0.95,0.3*Math.cos(lon)];});
+  N.filter(n=>n.kind==='centre').forEach((n,i,a)=>{n.p=[(i-(a.length-1)/2)*0.4,0,0];n.inner=true;});
+  E.forEach((e,i)=>e.off=(i*0.618)%1);
+  document.getElementById('legend').innerHTML=Object.keys(TEAMS).map(t=>`<span><i style="background:${COL[t]}"></i>${esc(TEAMS[t])}</span>`).join('')+
+    `<span><i style="background:${TOPC}"></i>Decision maker</span><span><i style="background:${CENTRE}"></i>Goals (centre)</span><span><i style="background:${BAD}"></i>Broken or on its own</span>`;
+  const nb=N.filter(n=>n.bad).length+E.filter(e=>!e.ok).length,st=document.getElementById('status');
+  st.textContent=nb?`${nb} problem(s)`:`All green: ${N.length} agents, ${E.length} hand-offs`;st.className='status '+(nb?'r':'g');
+  document.getElementById('checked').textContent=d.checked?('Checked '+d.checked):'';
+  select(null);requestAnimationFrame(draw);
+}
+const colourOf=n=>n.bad?BAD:n.kind==='centre'?CENTRE:n.kind==='top'?TOPC:(COL[n.team]||'#ffc857');
+function rot(p){let[x,y,z]=p;let c=Math.cos(ry),s=Math.sin(ry);[x,z]=[x*c+z*s,-x*s+z*c];c=Math.cos(rx);s=Math.sin(rx);[y,z]=[y*c-z*s,y*s+z*c];return[x,y,z];}
+function proj(p){const R=Math.min(W,H)*0.4*zoom,q=rot(p),k=3.2/(3.2-q[2]);return{x:W/2+q[0]*R*k,y:H/2-q[1]*R*k,z:q[2],k};}
+function lerp(a,b,t){return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
+function slerp(a,b,t){const d=Math.max(-1,Math.min(1,a[0]*b[0]+a[1]*b[1]+a[2]*b[2])),om=Math.acos(d);if(om<1e-3)return a;const s=Math.sin(om),A=Math.sin((1-t)*om)/s,B=Math.sin(t*om)/s,l=1+0.08*Math.sin(Math.PI*t);return[(A*a[0]+B*b[0])*l,(A*a[1]+B*b[1])*l,(A*a[2]+B*b[2])*l];}
+function along(e,t){const a=byId[e.from],b=byId[e.to];return(a.inner||b.inner)?lerp(a.p,b.p,t):slerp(a.p,b.p,t);}
+function visible(n){return filter==='all'||n.bad||E.some(e=>!e.ok&&(e.from===n.id||e.to===n.id));}
+function related(id){const s=new Set([id]);E.forEach(e=>{if(e.from===id)s.add(e.to);if(e.to===id)s.add(e.from);});return s;}
+const t0=performance.now();
+function draw(now){const t=(now-t0)/1000;if(spin&&!drag)ry+=SPIN;cx.clearRect(0,0,W,H);const focus=sel||hover,rel=focus?related(focus):null;
+  const R=Math.min(W,H)*0.4*zoom;cx.strokeStyle='rgba(157,184,255,.1)';cx.beginPath();cx.arc(W/2,H/2,R*1.07,0,7);cx.stroke();
+  const flows=[];
+  E.forEach(e=>{const a=byId[e.from],b=byId[e.to];if(!visible(a)||!visible(b))return;const on=!rel||e.from===focus||e.to===focus;
+    const steps=(a.inner||b.inner)?1:18;let zs=0;cx.beginPath();for(let i=0;i<=steps;i++){const p=proj(along(e,i/steps));zs+=p.z;i?cx.lineTo(p.x,p.y):cx.moveTo(p.x,p.y);}
+    const depth=0.35+0.65*((zs/(steps+1))+1)/2;
+    if(!e.ok){cx.strokeStyle=`rgba(255,59,71,${0.6+0.4*Math.sin(t*5)})`;cx.lineWidth=7;}else{cx.strokeStyle=on?`rgba(244,246,251,${(rel?0.9:0.3)*depth})`:'rgba(244,246,251,.05)';cx.lineWidth=rel&&on?2.6:1.3;}
+    cx.stroke();if(e.ok&&on&&!reduce)flows.push({e,depth,col:colourOf(a)});});
+  flows.forEach(({e,depth,col})=>{const f=((t/FLOW_SECONDS)+e.off)%1,q=proj(along(e,f)),r=(rel?4.5:3.2)*q.k,a=(rel?.95:.6)*depth*Math.sin(Math.PI*f);
+    const g=cx.createRadialGradient(q.x,q.y,0,q.x,q.y,r*3);g.addColorStop(0,col);g.addColorStop(1,'rgba(0,0,0,0)');cx.globalAlpha=a;cx.fillStyle=g;cx.beginPath();cx.arc(q.x,q.y,r*3,0,7);cx.fill();
+    cx.globalAlpha=Math.min(1,a+.1);cx.fillStyle='#fff';cx.beginPath();cx.arc(q.x,q.y,r*.55,0,7);cx.fill();cx.globalAlpha=1;});
+  const P=N.filter(visible).map(n=>({n,q:proj(n.p)})).sort((a,b)=>a.q.z-b.q.z);P.forEach(o=>o.n._q=o.q);
+  P.forEach(({n,q})=>{const dim=rel&&!rel.has(n.id),depth=.45+.55*(q.z+1)/2,col=colourOf(n),tw=reduce?1:.75+.25*Math.sin(t*2.2+n.p[0]*9+n.p[1]*7);
+    let r=(n.kind==='centre'?13:n.kind==='top'?10:7)*q.k*(dim?.7:1);if(n.bad&&!reduce)r*=1+.25*Math.sin(t*6);const a=(dim?.18:1)*depth*tw;
+    const g=cx.createRadialGradient(q.x,q.y,0,q.x,q.y,r*3.2);g.addColorStop(0,col);g.addColorStop(.25,col);g.addColorStop(1,'rgba(0,0,0,0)');
+    cx.globalAlpha=a*.55;cx.fillStyle=g;cx.beginPath();cx.arc(q.x,q.y,r*3.2,0,7);cx.fill();cx.globalAlpha=Math.min(1,a+.15);cx.fillStyle=col;cx.beginPath();cx.arc(q.x,q.y,r,0,7);cx.fill();
+    if(n.id===sel){cx.globalAlpha=1;cx.strokeStyle='#fff';cx.lineWidth=3;cx.beginPath();cx.arc(q.x,q.y,r+7,0,7);cx.stroke();}cx.globalAlpha=1;});
+  cx.textAlign='center';cx.textBaseline='bottom';const placed=[];
+  [...P].reverse().forEach(({n,q})=>{const show=(rel&&rel.has(n.id))||(!rel&&(q.z>(W<600?.7:.3)||n.kind!=='agent'||n.bad));if(!show)return;const big=rel&&rel.has(n.id);
+    cx.font=`700 ${big?18:15}px ${getComputedStyle(document.body).fontFamily}`;const w=cx.measureText(n.label).width+12,h=big?24:20,y=q.y-(n.kind==='centre'?20:14)*q.k,x=Math.max(w/2+2,Math.min(W-w/2-2,q.x));
+    const box=[x-w/2,y-h,x+w/2,y];if(placed.some(b=>box[0]<b[2]&&box[2]>b[0]&&box[1]<b[3]&&box[3]>b[1]))return;placed.push(box);
+    cx.fillStyle='rgba(7,10,18,.8)';cx.fillRect(x-w/2,y-h,w,h);cx.fillStyle=n.bad?BAD:'#f4f6fb';cx.fillText(n.label,x,y-2);});
+  requestAnimationFrame(draw);}
+let lx=0,ly=0,moved=0;const pts=new Map();let pinch0=0,zoom0=1;
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);pts.set(e.pointerId,[e.clientX,e.clientY]);drag=true;moved=0;lx=e.clientX;ly=e.clientY;if(pts.size===2){const[a,b]=[...pts.values()];pinch0=Math.hypot(a[0]-b[0],a[1]-b[1]);zoom0=zoom;}});
+cv.addEventListener('pointermove',e=>{const r=cv.getBoundingClientRect();if(pts.has(e.pointerId))pts.set(e.pointerId,[e.clientX,e.clientY]);
+  if(pts.size===2){const[a,b]=[...pts.values()];zoom=Math.max(.6,Math.min(2.6,zoom0*Math.hypot(a[0]-b[0],a[1]-b[1])/pinch0));moved+=10;return;}
+  if(drag){const dx=e.clientX-lx,dy=e.clientY-ly;moved+=Math.abs(dx)+Math.abs(dy);ry+=dx*.006;rx=Math.max(-1.4,Math.min(1.4,rx+dy*.006));lx=e.clientX;ly=e.clientY;}
+  else{hover=pick(e.clientX-r.left,e.clientY-r.top);cv.style.cursor=hover?'pointer':'grab';}});
+const end=e=>{pts.delete(e.pointerId);if(!pts.size)drag=false;};
+cv.addEventListener('pointerup',e=>{const r=cv.getBoundingClientRect();if(moved<6)select(pick(e.clientX-r.left,e.clientY-r.top));end(e);});
+cv.addEventListener('pointercancel',end);cv.addEventListener('pointerleave',()=>hover=null);
+cv.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.6,Math.min(2.6,zoom*(e.deltaY<0?1.08:.93)));},{passive:false});
+function pick(x,y){let best=null,bd=26;N.forEach(n=>{if(!n._q||!visible(n))return;const d=Math.hypot(n._q.x-x,n._q.y-y)-n._q.z*6;if(d<bd){bd=d;best=n.id;}});return best;}
+const btn=(id,txt,ok)=>`<li><button data-id="${id}"><strong style="color:${ok?'inherit':BAD}">${esc(txt)}</strong></button></li>`;
+const et=(e,o)=>byId[o].label+(e.what?' · '+e.what:'')+(e.ok?'':' · BROKEN');
+function select(id){sel=id;if(!id){panel.innerHTML=overview();bind();return;}
+  const n=byId[id],ins=E.filter(e=>e.to===id),outs=E.filter(e=>e.from===id),st=n.ok===false?['BROKEN',BAD]:n.alone?['ON ITS OWN',BAD]:['WORKING','#7fe0a0'];
+  panel.innerHTML=`<h2>${esc(n.label)}</h2><p><span class="chip" style="color:${colourOf({...n,bad:false})}">${esc(TEAMS[n.team]||(n.kind==='top'?'Decision maker':'Goal'))}</span><span class="chip" style="color:${st[1]}">${st[0]}</span>${n.private?'<span class="chip">PRIVATE</span>':''}</p>
+  <p>${esc(n.desc||'')}</p>${ins.length?`<p class="sub">Receives work from</p><ul>${ins.map(e=>btn(e.from,et(e,e.from),e.ok)).join('')}</ul>`:''}
+  ${outs.length?`<p class="sub">Sends its work to</p><ul>${outs.map(e=>btn(e.to,et(e,e.to),e.ok)).join('')}</ul>`:''}<p><button class="back">Back to the overview</button></p>`;bind();}
+function overview(){const b=N.filter(n=>n.bad).length,be=E.filter(e=>!e.ok).length;
+  const groups=[['_top','Decision maker'],['_centre','Goals'],...Object.entries(TEAMS)];
+  return `<h2>${b+be?`${b} agent(s) and ${be} hand-off(s) need attention`:`All ${N.length} agents connected and working`}</h2><p>Each light is an agent and each line a hand-off. The small moving lights show which way the work flows. Click a light or a name below.</p>`+
+    groups.map(([t,name])=>{const L=N.filter(n=>n.team===t);return L.length?`<p class="sub">${esc(name)}</p><ul>${L.map(n=>btn(n.id,n.label+(n.bad?' (problem)':''),!n.bad)).join('')}</ul>`:'';}).join('');}
+function bind(){panel.querySelectorAll('button[data-id]').forEach(b=>b.onclick=()=>select(b.dataset.id));const k=panel.querySelector('.back');if(k)k.onclick=()=>select(null);}
+document.querySelectorAll('.controls button[data-f]').forEach(b=>b.onclick=()=>{filter=b.dataset.f;document.querySelectorAll('.controls button[data-f]').forEach(x=>x.setAttribute('aria-pressed',x===b));});
+const sp=document.getElementById('spin');const sl=()=>{sp.setAttribute('aria-pressed',spin);sp.textContent=spin?'Auto-spin on':'Auto-spin off';};sl();sp.onclick=()=>{spin=!spin;sl();};
+fetch('agents.json',{cache:'no-cache'}).then(r=>r.json()).then(load).catch(()=>{panel.innerHTML='<p>Could not load agents.json. If you opened this file directly, run a tiny local web server in this folder first (see the README).</p>';});
+})();
+</script>
+</body>
+</html>

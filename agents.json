@@ -1,0 +1,35 @@
+{
+  "title": "My AI agent team",
+  "checked": "2 Nov 2026 (example data, replace with your own)",
+  "teams": [
+    {"id": "content", "name": "Content team", "colour": "#ffc857"},
+    {"id": "data", "name": "Data team", "colour": "#5ee0ff"},
+    {"id": "ops", "name": "Operations", "colour": "#ff7ad9"}
+  ],
+  "centre": [
+    {"id": "goal", "label": "GOAL: grow the business", "desc": "Every chain of agents should end here."},
+    {"id": "me", "label": "Me (decides)", "desc": "The human who gives the final yes or no.", "top": true}
+  ],
+  "agents": [
+    {"id": "research", "label": "Researcher", "team": "content", "desc": "Finds this week's topics and sources.", "ok": true},
+    {"id": "writer", "label": "Writer", "team": "content", "desc": "Drafts articles from the research and my own notes.", "ok": true},
+    {"id": "checker", "label": "Fact checker", "team": "content", "desc": "Blocks anything it can't find in the sources.", "ok": true},
+    {"id": "publisher", "label": "Publisher", "team": "content", "desc": "Puts approved drafts live.", "ok": true},
+    {"id": "pull", "label": "Data pull", "team": "data", "desc": "Pulls analytics every morning.", "ok": true},
+    {"id": "analyst", "label": "Analyst", "team": "data", "desc": "Spots anything unusual in the numbers.", "ok": true},
+    {"id": "report", "label": "Weekly report", "team": "data", "desc": "Turns the numbers into a one-page summary.", "ok": false},
+    {"id": "health", "label": "Health check", "team": "ops", "desc": "Checks every agent ran and produced something real.", "ok": true},
+    {"id": "inbox", "label": "Inbox sorter", "team": "ops", "desc": "An agent nobody connected yet - it shows up red as 'on its own'.", "ok": true, "private": false}
+  ],
+  "handoffs": [
+    {"from": "research", "to": "writer", "what": "topics and sources", "ok": true},
+    {"from": "writer", "to": "checker", "what": "every draft", "ok": true},
+    {"from": "checker", "to": "me", "what": "drafts to approve", "ok": true},
+    {"from": "me", "to": "publisher", "what": "approved drafts", "ok": true},
+    {"from": "publisher", "to": "goal", "what": "articles live", "ok": true},
+    {"from": "pull", "to": "analyst", "what": "fresh numbers", "ok": true},
+    {"from": "analyst", "to": "report", "what": "anything unusual", "ok": false},
+    {"from": "report", "to": "me", "what": "weekly summary", "ok": true},
+    {"from": "health", "to": "me", "what": "what's broken", "ok": true}
+  ]
+}
